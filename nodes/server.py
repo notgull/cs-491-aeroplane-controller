@@ -1,18 +1,30 @@
-#!/usr/bin/env
+#!/usr/bin/env python
 # NO IMPLIED WARRANTY
 # Written by John Nunley, <your names here>
 
 import rospy
 
+from dynamic_reconfigure.server import Server
+from cs_491_controller.cfg import TutorialsConfig
+
+from std_msgs.msg import String
+
 # TODO: I don't know how ROS works well enough to say if this works or not
 TOPIC_NAME = "/minihawk_SIM/mavros/rc/override"
 TAG_DETECTION = "tag_detection"
+
+def callback(config, level):
+    rospy.loginfo("""Reconfigure Request: {int_param}, {double_param},\ 
+          {str_param}, {bool_param}, {size}""".format(**config))
+    return config
 
 def publisher():
     # TODO: Use the actual mavros message type
     pub = rospy.Publisher(TOPIC_NAME, String, queue_size=10)
     rospy.init_node("cs_491_controller", anonymous=True)
     rate = rospy.Rate(10)
+
+    srv = Server(TutorialsConfig, callback)
 
     # Like and subscribe to the tag detection topic
     def process_tag_detection(data):
@@ -27,7 +39,4 @@ def publisher():
         rate.sleep()
 
 if __name__ == "__main__":
-    try:
-        publisher()
-    except rospy.ROSInterruptException:
-        pass
+    publisher()
