@@ -7,6 +7,7 @@ import rospy
 from dynamic_reconfigure.server import Server
 from cs_491_controller.cfg import TutorialsConfig
 
+from mavros_msgs.msg import OverrideRCIn
 from std_msgs.msg import String
 
 # TODO: I don't know how ROS works well enough to say if this works or not
@@ -20,7 +21,7 @@ def callback(config, level):
 
 def publisher():
     # TODO: Use the actual mavros message type
-    pub = rospy.Publisher(TOPIC_NAME, String, queue_size=10)
+    pub = rospy.Publisher(TOPIC_NAME, OverrideRCIn, queue_size=10)
     rospy.init_node("cs_491_controller", anonymous=True)
     rate = rospy.Rate(10)
 
@@ -33,7 +34,10 @@ def publisher():
 
     while not rospy.is_shutdown():
         # TODO: Adjust on user input, somehow
-        the_data = "channels: [1500, 1500, 1500, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]"
+        the_data = OverrideRCIn()
+        the_data.channels = [
+            1500, 1500, 1500, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        ]
 
         pub.publish(the_data)
         rate.sleep()
