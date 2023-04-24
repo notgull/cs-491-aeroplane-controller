@@ -8,20 +8,26 @@ from dynamic_reconfigure.server import Server
 from cs_491_controller.cfg import TutorialsConfig
 
 from mavros_msgs.msg import OverrideRCIn
-from std_msgs.msg import String
+from apriltag_ros.msg import AprilTagDetectionArray
 
 # TODO: I don't know how ROS works well enough to say if this works or not
 TOPIC_NAME = "/minihawk_SIM/mavros/rc/override"
-TAG_DETECTION = "tag_detection"
+TAG_DETECTION = "/minihawk_SIM/MH_usb_camera_link_optical/tag_detections"
 
 def callback(config, level):
     # rospy.loginfo("""Reconfigure Request: {int_param}, {double_param},\ 
     #       {str_param}, {bool_param}, {size}""".format(**config))
     return config
 
+
+# Like and subscribe to the tag detection topic
+def process_tag_detection(msg):
+    rospy.loginfo(msg.detections[0].pose)
+
 def publisher():
     # TODO: Use the actual mavros message type
     pub = rospy.Publisher(TOPIC_NAME, OverrideRCIn, queue_size=10)
+    sub = rospy.Subscriber(TAG_DETECTION, AprilTagDetectionArray, process_tag_detection)
     rospy.init_node("cs_491_controller", anonymous=True)
     rate = rospy.Rate(10)
 
@@ -49,16 +55,13 @@ def publisher():
         channels[16] = config["channel13"]
         channels[17] = config["channel14"]
 
-        rospy.loginfo("Updated channels to {}".format(channels))
+        # rospy.loginfo("Updated channels to {}".format(channels))
 
         return config
 
     srv = Server(TutorialsConfig, on_receive_config)
 
-    # Like and subscribe to the tag detection topic
-    def process_tag_detection(data):
-        rospy.loginfo(data.data)
-    rospy.Subscriber(TAG_DETECTION, String, process_tag_detection)
+
 
     while not rospy.is_shutdown():
         the_data = OverrideRCIn()
