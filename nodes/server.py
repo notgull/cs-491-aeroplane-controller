@@ -22,7 +22,7 @@ def callback(config, level):
 
 # Like and subscribe to the tag detection topic
 def process_tag_detection(msg):
-    rospy.loginfo(msg.detections[0].pose)
+    rospy.loginfo(msg.detections[0].pose) # http://docs.ros.org/en/indigo/api/apriltags_ros/html/msg/AprilTagDetectionArray.html
 
 def publisher():
     # TODO: Use the actual mavros message type
