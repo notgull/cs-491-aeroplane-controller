@@ -4,6 +4,9 @@
 
 import rospy
 import enum
+import time
+
+from pid import PID
 
 from dynamic_reconfigure.server import Server
 from cs_491_controller.cfg import TutorialsConfig
@@ -28,15 +31,17 @@ def callback(config, level):
 
 state = RobotState.SEEKING
 
+# Approximate center in terms of the X coordinate
+CENTER_X = 3
+
 def publisher():
+    global state
     # TODO: Use the actual mavros message type
     pub = rospy.Publisher(TOPIC_NAME, OverrideRCIn, queue_size=10)
     rospy.init_node("cs_491_controller", anonymous=True)
     rate = rospy.Rate(10)
 
-    channels = [
-        1500, 1500, 1500, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    ]
+    channels = [1464, 1598, 1466, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
     def on_receive_config(config, level):
         channels[0] = config["roll"]
@@ -70,28 +75,37 @@ def publisher():
     # TODO: Assumes that the waypoints are already loaded
     set_mode(0, "AUTO")
     arm(True) 
+    previously_triggered = False
+    last_check = time.time()
 
     # Like and subscribe to the tag detection topic
     def process_tag_detection(msg):
         global state
         if len(msg.detections) > 0:
+            last_check = time.time()
+            previously_triggered = True
+
             # If we're still looking for the tag... we've found it! Descend!
             if state == RobotState.SEEKING:
                 # TODO: Centering
                 set_mode(0, "QLAND")
-                state = RobotState.DESCENDING
+                state = RobotState.CENTERING
             rospy.loginfo(msg.detections[0].pose) # http://docs.ros.org/en/indigo/api/apriltags_ros/html/msg/AprilTagDetectionArray.html
 
     sub = rospy.Subscriber(TAG_DETECTION, AprilTagDetectionArray, process_tag_detection)
 
     while not rospy.is_shutdown():
-        if state == RobotState.SEEKING:
-            # Just wait for now
-            pass
-        #the_data = OverrideRCIn()
-        #the_data.channels = channels
+        if state == RobotState.CENTERING:    
+            # Actively center on the target.
+            the_data = OverrideRCIn()
+            the_data.channels = channels
 
-        #pub.publish(the_data)
+            pub.publish(the_data)
+
+            # If it's been 2 seconds since we last saw the tag, just keep descending.
+            if previously_triggered and time.time() - last_check > 2: 
+                set_mode(0, "QLAND")
+                state = RobotState.DESCENDING
 
         rate.sleep()
 
