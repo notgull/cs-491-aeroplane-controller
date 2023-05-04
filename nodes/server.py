@@ -3,31 +3,34 @@
 # Written by John Nunley, <your names here>
 
 import rospy
+import enum
 
 from dynamic_reconfigure.server import Server
 from cs_491_controller.cfg import TutorialsConfig
 
 from mavros_msgs.msg import OverrideRCIn
+from mavros_msgs.srv import SetMode, CommandBool
 from apriltag_ros.msg import AprilTagDetectionArray
 
 # TODO: I don't know how ROS works well enough to say if this works or not
 TOPIC_NAME = "/minihawk_SIM/mavros/rc/override"
 TAG_DETECTION = "/minihawk_SIM/MH_usb_camera_link_optical/tag_detections"
 
+class RobotState(enum.Enum):
+    SEEKING = 0
+    CENTERING = 1
+    DESCENDING = 2
+
 def callback(config, level):
     # rospy.loginfo("""Reconfigure Request: {int_param}, {double_param},\ 
     #       {str_param}, {bool_param}, {size}""".format(**config))
     return config
 
-
-# Like and subscribe to the tag detection topic
-def process_tag_detection(msg):
-    rospy.loginfo(msg.detections[0].pose) # http://docs.ros.org/en/indigo/api/apriltags_ros/html/msg/AprilTagDetectionArray.html
+state = RobotState.SEEKING
 
 def publisher():
     # TODO: Use the actual mavros message type
     pub = rospy.Publisher(TOPIC_NAME, OverrideRCIn, queue_size=10)
-    sub = rospy.Subscriber(TAG_DETECTION, AprilTagDetectionArray, process_tag_detection)
     rospy.init_node("cs_491_controller", anonymous=True)
     rate = rospy.Rate(10)
 
@@ -60,14 +63,36 @@ def publisher():
         return config
 
     srv = Server(TutorialsConfig, on_receive_config)
+    set_mode = rospy.ServiceProxy("/minihawk_SIM/mavros/set_mode", SetMode)
+    arm = rospy.ServiceProxy("/minihawk_SIM/mavros/cmd/arming", CommandBool)
 
+    # Begin launching.
+    # TODO: Assumes that the waypoints are already loaded
+    set_mode(0, "AUTO")
+    arm(True) 
 
+    # Like and subscribe to the tag detection topic
+    def process_tag_detection(msg):
+        global state
+        if len(msg.detections) > 0:
+            # If we're still looking for the tag... we've found it! Descend!
+            if state == RobotState.SEEKING:
+                # TODO: Centering
+                set_mode(0, "QLAND")
+                state = RobotState.DESCENDING
+            rospy.loginfo(msg.detections[0].pose) # http://docs.ros.org/en/indigo/api/apriltags_ros/html/msg/AprilTagDetectionArray.html
+
+    sub = rospy.Subscriber(TAG_DETECTION, AprilTagDetectionArray, process_tag_detection)
 
     while not rospy.is_shutdown():
-        the_data = OverrideRCIn()
-        the_data.channels = channels
+        if state == RobotState.SEEKING:
+            # Just wait for now
+            pass
+        #the_data = OverrideRCIn()
+        #the_data.channels = channels
 
-        pub.publish(the_data)
+        #pub.publish(the_data)
+
         rate.sleep()
 
 
