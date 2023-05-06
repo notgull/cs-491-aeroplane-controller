@@ -5,6 +5,7 @@
 import rospy
 import enum
 import time
+import math
 
 from pid import PID
 
@@ -15,14 +16,20 @@ from mavros_msgs.msg import OverrideRCIn
 from mavros_msgs.srv import SetMode, CommandBool
 from apriltag_ros.msg import AprilTagDetectionArray
 
-# TODO: I don't know how ROS works well enough to say if this works or not
+from scipy.spatial.transform import Rotation as R
+
 TOPIC_NAME = "/minihawk_SIM/mavros/rc/override"
 TAG_DETECTION = "/minihawk_SIM/MH_usb_camera_link_optical/tag_detections"
 
 class RobotState(enum.Enum):
     SEEKING = 0
-    CENTERING = 1
-    DESCENDING = 2
+    CENTERING_YAW = 1
+    CENTERING_X = 2
+    CENTERING_Y = 3
+    DESCENDING = 4
+
+    def is_centering(self):
+        return self == RobotState.CENTERING_YAW or self == RobotState.CENTERING_X or self == RobotState.CENTERING_Y
 
 def callback(config, level):
     # rospy.loginfo("""Reconfigure Request: {int_param}, {double_param},\ 
@@ -30,38 +37,66 @@ def callback(config, level):
     return config
 
 state = RobotState.SEEKING
+print('Enter Seeking Mode:')
+
+detection_pose = None
+
+RESTING = [1500, 1500, 1500, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] 
+SCALE_FACTOR = 3
+MAX_DIRECTION = 250
+
+def clampDir(d):
+    if d > MAX_DIRECTION:
+        return MAX_DIRECTION
+    elif d < -MAX_DIRECTION:
+        return -MAX_DIRECTION
+    else:
+        return d
+
+def applyDirection(
+    roll, pitch, throttle, yaw
+):
+    res = [1500, 1500, 1500, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] 
+    res[0] += clampDir(roll)
+    res[1] += clampDir(pitch)
+    res[2] += clampDir(throttle)
+    res[3] += clampDir(yaw)
+    return res
 
 # Approximate center in terms of the X coordinate
 CENTER_X = 3
+GLOBALPARAM = 0
+CENTERING_START = None
 
 def publisher():
     global state
-    # TODO: Use the actual mavros message type
     pub = rospy.Publisher(TOPIC_NAME, OverrideRCIn, queue_size=10)
     rospy.init_node("cs_491_controller", anonymous=True)
     rate = rospy.Rate(10)
 
-    channels = [1464, 1598, 1466, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    channels = RESTING
 
     def on_receive_config(config, level):
-        channels[0] = config["roll"]
-        channels[1] = config["pitch"]
-        channels[2] = config["throttle"]
-        channels[3] = config["yaw"]
-        channels[4] = config["channel1"]
-        channels[5] = config["channel2"]
-        channels[6] = config["channel3"]
-        channels[7] = config["channel4"]
-        channels[8] = config["channel5"]
-        channels[9] = config["channel6"]
-        channels[10] = config["channel7"]
-        channels[11] = config["channel8"]
-        channels[12] = config["channel9"]
-        channels[13] = config["channel10"]
-        channels[14] = config["channel11"]
-        channels[15] = config["channel12"]
-        channels[16] = config["channel13"]
-        channels[17] = config["channel14"]
+        global GLOBALPARAM
+        # channels[0] = config["roll"]
+        # channels[1] = config["pitch"]
+        # channels[2] = config["throttle"]
+        # channels[3] = config["yaw"]
+        print('updating gain')
+        GLOBALPARAM = config["channel1"]
+        # channels[5] = config["channel2"]
+        # channels[6] = config["channel3"]
+        # channels[7] = config["channel4"]
+        # channels[8] = config["channel5"]
+        # channels[9] = config["channel6"]
+        # channels[10] = config["channel7"]
+        # channels[11] = config["channel8"]
+        # channels[12] = config["channel9"]
+        # channels[13] = config["channel10"]
+        # channels[14] = config["channel11"]
+        # channels[15] = config["channel12"]
+        # channels[16] = config["channel13"]
+        # channels[17] = config["channel14"]
 
         # rospy.loginfo("Updated channels to {}".format(channels))
 
@@ -74,45 +109,81 @@ def publisher():
     # Begin launching.
     # TODO: Assumes that the waypoints are already loaded
     set_mode(0, "AUTO")
-    arm(True) 
-    previously_triggered = False
-    last_check = time.time()
+    arm(True)
 
     # Like and subscribe to the tag detection topic
     def process_tag_detection(msg):
         global state
+        global detection_pose
+        global CENTERING_START
+
         if len(msg.detections) > 0:
-            last_check = time.time()
-            previously_triggered = True
+            detection_pose = msg.detections[-1].pose
 
-            # If we're still looking for the tag... we've found it! Descend!
-            if state == RobotState.SEEKING:
-                # TODO: Centering
-                set_mode(0, "QLAND")
-                state = RobotState.CENTERING
-            rospy.loginfo(msg.detections[0].pose) # http://docs.ros.org/en/indigo/api/apriltags_ros/html/msg/AprilTagDetectionArray.html
-
+            # If we're still looking for the tag... we've found it! Begin Centering!
+            if state == RobotState.SEEKING and abs(detection_pose.pose.pose.position.x) < 3.0 and abs(detection_pose.pose.pose.position.y) < 3.0 :
+                state = RobotState.CENTERING_YAW
+                set_mode(0, "QLOITER")
+                print('Enter Centering Mode')
+                CENTERING_START = time.time()
+                
     sub = rospy.Subscriber(TAG_DETECTION, AprilTagDetectionArray, process_tag_detection)
 
-    while not rospy.is_shutdown():
-        if state == RobotState.CENTERING:    
-            # Actively center on the target.
-            the_data = OverrideRCIn()
-            the_data.channels = channels
+    # Try to center as close as we can
+    x_setpoint = 0.0
+    y_setpoint = -3.0
+    diff = 1.0
+    last_diffpoint = None
 
+    xcoord_PID = PID(25.0, 2.5, 0.0, setpoint=x_setpoint)
+    ycoord_PID = PID(25.0, 5.0, 10.0, setpoint=y_setpoint)
+
+    last_update_time = time.time()
+    while not rospy.is_shutdown():
+        if state.is_centering():
+            # Actively center on the target.
+            posn = detection_pose.pose.pose.position
+            current_time = time.time()
+            dt = current_time - last_update_time
+            last_update_time = current_time
+
+            # Get the amount we should move forwards/backwards.
+            roll_factor = xcoord_PID(posn.x, dt)
+            pitch_factor = ycoord_PID(posn.y, dt)
+
+            # Apply it to the channels
+            desiredMove = applyDirection(-roll_factor, pitch_factor, 0, 0)
+
+            print("X Error: {}, Y Error: {}".format(posn.x, posn.y))
+
+            # If our difference is marginal, start the landing cycle.
+            if abs(y_setpoint - posn.y) < diff and abs(x_setpoint - posn.x) < diff:
+                if last_diffpoint is None:
+                    last_diffpoint = current_time
+                elif current_time - last_diffpoint > 10:
+                    state = RobotState.DESCENDING
+                    set_mode(0, "QLAND")
+                    desiredMove = [1500, 1500, 1500, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] 
+                    print("Entering the descent...")
+            else:
+                last_diffpoint = current_time
+
+            print(
+                "Roll: {:4.4f} Pitch: {:4.4f} Throttle: {:4.4f} Yaw: {:4.4f}"
+                  .format(desiredMove[0], desiredMove[1], desiredMove[2], desiredMove[3])
+            )
+
+            # Send the move to the aerial robot
+            the_data = OverrideRCIn()
+            the_data.channels = desiredMove
             pub.publish(the_data)
 
-            # If it's been 2 seconds since we last saw the tag, just keep descending.
-            if previously_triggered and time.time() - last_check > 2: 
-                set_mode(0, "QLAND")
-                state = RobotState.DESCENDING
+            # If we've been centering for five seconds, start landing.
+            #if current_time - CENTERING_START > 10:
+            #    state = RobotState.DESCENDING
+            #    print("Entering descent...")
 
         rate.sleep()
-
-
-
-
-
 
 if __name__ == "__main__":
     publisher()
