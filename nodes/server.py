@@ -130,14 +130,14 @@ def publisher():
     sub = rospy.Subscriber(TAG_DETECTION, AprilTagDetectionArray, process_tag_detection)
 
     # Try to center as close as we can
-    distance_PID = PID(150.0, 0.0, 0.0, setpoint=0)
+    distance_PID = PID(50.0, 0.0, 0.0, setpoint=3.0)
 
     last_update_time = time.time()
     while not rospy.is_shutdown():
         if state.is_centering():
             # Actively center on the target.
             posn = detection_pose.pose.pose.position
-            error = posn.y
+            error = -posn.y
             current_time = time.time()
             dt = current_time - last_update_time
             last_update_time = current_time
@@ -146,8 +146,9 @@ def publisher():
             factor = distance_PID(error, dt)
 
             # Apply it to the channels
-            desiredMove = applyDirection(0, -factor, 0, 0)
+            desiredMove = applyDirection(0, factor, 0, 0)
 
+            print("Error: {}".format(error))
             print(
                 "Roll: {:4.4f} Pitch: {:4.4f} Throttle: {:4.4f} Yaw: {:4.4f}"
                   .format(desiredMove[0], desiredMove[1], desiredMove[2], desiredMove[3])
