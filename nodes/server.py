@@ -137,7 +137,7 @@ def publisher():
         if state.is_centering():
             # Actively center on the target.
             posn = detection_pose.pose.pose.position
-            error = math.sqrt(posn.x**2 + posn.y**2)
+            error = posn.y
             current_time = time.time()
             dt = current_time - last_update_time
             last_update_time = current_time
