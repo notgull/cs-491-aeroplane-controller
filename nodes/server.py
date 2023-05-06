@@ -135,8 +135,8 @@ def publisher():
     diff = 1.0
     last_diffpoint = None
 
-    xcoord_PID = PID(25.0, 0.0, 0.0, setpoint=x_setpoint)
-    ycoord_PID = PID(25.0, 0.0, 10.0, setpoint=y_setpoint)
+    xcoord_PID = PID(25.0, 2.5, 0.0, setpoint=x_setpoint)
+    ycoord_PID = PID(25.0, 5.0, 10.0, setpoint=y_setpoint)
 
     last_update_time = time.time()
     while not rospy.is_shutdown():
@@ -152,19 +152,21 @@ def publisher():
             pitch_factor = ycoord_PID(posn.y, dt)
 
             # Apply it to the channels
-            desiredMove = applyDirection(roll_factor, pitch_factor, 0, 0)
+            desiredMove = applyDirection(-roll_factor, pitch_factor, 0, 0)
 
             print("X Error: {}, Y Error: {}".format(posn.x, posn.y))
 
             # If our difference is marginal, start the landing cycle.
             if abs(y_setpoint - posn.y) < diff and abs(x_setpoint - posn.x) < diff:
-                if last_diffpoint is None or current_time - last_diffpoint < 10:
-                    last_diffpoint = time.time()
-                else:
+                if last_diffpoint is None:
+                    last_diffpoint = current_time
+                elif current_time - last_diffpoint > 10:
                     state = RobotState.DESCENDING
                     set_mode(0, "QLAND")
                     desiredMove = [1500, 1500, 1500, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] 
                     print("Entering the descent...")
+            else:
+                last_diffpoint = current_time
 
             print(
                 "Roll: {:4.4f} Pitch: {:4.4f} Throttle: {:4.4f} Yaw: {:4.4f}"
