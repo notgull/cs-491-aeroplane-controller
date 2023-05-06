@@ -130,25 +130,42 @@ def publisher():
     sub = rospy.Subscriber(TAG_DETECTION, AprilTagDetectionArray, process_tag_detection)
 
     # Try to center as close as we can
-    distance_PID = PID(50.0, 0.0, 0.0, setpoint=3.0)
+    x_setpoint = 0.0
+    y_setpoint = -3.0
+    diff = 1.0
+    last_diffpoint = None
+
+    xcoord_PID = PID(25.0, 0.0, 0.0, setpoint=x_setpoint)
+    ycoord_PID = PID(25.0, 0.0, 10.0, setpoint=y_setpoint)
 
     last_update_time = time.time()
     while not rospy.is_shutdown():
         if state.is_centering():
             # Actively center on the target.
             posn = detection_pose.pose.pose.position
-            error = -posn.y
             current_time = time.time()
             dt = current_time - last_update_time
             last_update_time = current_time
 
             # Get the amount we should move forwards/backwards.
-            factor = distance_PID(error, dt)
+            roll_factor = xcoord_PID(posn.x, dt)
+            pitch_factor = ycoord_PID(posn.y, dt)
 
             # Apply it to the channels
-            desiredMove = applyDirection(0, factor, 0, 0)
+            desiredMove = applyDirection(roll_factor, pitch_factor, 0, 0)
 
-            print("Error: {}".format(error))
+            print("X Error: {}, Y Error: {}".format(posn.x, posn.y))
+
+            # If our difference is marginal, start the landing cycle.
+            if abs(y_setpoint - posn.y) < diff and abs(x_setpoint - posn.x) < diff:
+                if last_diffpoint is None or current_time - last_diffpoint < 10:
+                    last_diffpoint = time.time()
+                else:
+                    state = RobotState.DESCENDING
+                    set_mode(0, "QLAND")
+                    desiredMove = [1500, 1500, 1500, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] 
+                    print("Entering the descent...")
+
             print(
                 "Roll: {:4.4f} Pitch: {:4.4f} Throttle: {:4.4f} Yaw: {:4.4f}"
                   .format(desiredMove[0], desiredMove[1], desiredMove[2], desiredMove[3])
