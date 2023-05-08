@@ -23,13 +23,12 @@ TAG_DETECTION = "/minihawk_SIM/MH_usb_camera_link_optical/tag_detections"
 
 class RobotState(enum.Enum):
     SEEKING = 0
-    CENTERING_YAW = 1
-    CENTERING_X = 2
-    CENTERING_Y = 3
+    CENTERING = 1
+    CENTERING_AND_DESCENDING = 2
     DESCENDING = 4
 
     def is_centering(self):
-        return self == RobotState.CENTERING_YAW or self == RobotState.CENTERING_X or self == RobotState.CENTERING_Y
+        return self == RobotState.CENTERING or self == RobotState.CENTERING_AND_DESCENDING
 
 def callback(config, level):
     # rospy.loginfo("""Reconfigure Request: {int_param}, {double_param},\ 
@@ -67,6 +66,7 @@ def applyDirection(
 CENTER_X = 3
 GLOBALPARAM = 0
 CENTERING_START = None
+LAST_POSE_TIME = time.time()
 
 def publisher():
     global state
@@ -116,13 +116,15 @@ def publisher():
         global state
         global detection_pose
         global CENTERING_START
+        global LAST_POSE_TIME
 
         if len(msg.detections) > 0:
+            LAST_POSE_TIME = time.time()
             detection_pose = msg.detections[-1].pose
 
             # If we're still looking for the tag... we've found it! Begin Centering!
             if state == RobotState.SEEKING and abs(detection_pose.pose.pose.position.x) < 3.0 and abs(detection_pose.pose.pose.position.y) < 3.0 :
-                state = RobotState.CENTERING_YAW
+                state = RobotState.CENTERING
                 set_mode(0, "QLOITER")
                 print('Enter Centering Mode')
                 CENTERING_START = time.time()
@@ -141,6 +143,8 @@ def publisher():
     last_update_time = time.time()
     while not rospy.is_shutdown():
         if state.is_centering():
+            # If we haven't gotten the tag for a while, we're probably 
+
             # Actively center on the target.
             posn = detection_pose.pose.pose.position
             current_time = time.time()
@@ -157,16 +161,22 @@ def publisher():
             print("X Error: {}, Y Error: {}".format(posn.x, posn.y))
 
             # If our difference is marginal, start the landing cycle.
-            if abs(y_setpoint - posn.y) < diff and abs(x_setpoint - posn.x) < diff:
-                if last_diffpoint is None:
+            if state == RobotState.CENTERING:
+                if abs(y_setpoint - posn.y) < diff and abs(x_setpoint - posn.x) < diff:
+                    if last_diffpoint is None:
+                        last_diffpoint = current_time
+                    elif current_time - last_diffpoint > 10:
+                        state = RobotState.CENTERING_AND_DESCENDING
+                        set_mode(0, "QLAND")
+                        print("Entering the descent...")
+                else:
                     last_diffpoint = current_time
-                elif current_time - last_diffpoint > 10:
+            elif state == RobotState.CENTERING_AND_DESCENDING:
+                # If we haven't gotten a new read in a while, enter the resting position.
+                if current_time - LAST_POSE_TIME > 0.5:
                     state = RobotState.DESCENDING
-                    set_mode(0, "QLAND")
                     desiredMove = [1500, 1500, 1500, 1500, 1800, 1000, 1000, 1800, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] 
-                    print("Entering the descent...")
-            else:
-                last_diffpoint = current_time
+                    print("Releasing control from PID controllers...")
 
             print(
                 "Roll: {:4.4f} Pitch: {:4.4f} Throttle: {:4.4f} Yaw: {:4.4f}"
