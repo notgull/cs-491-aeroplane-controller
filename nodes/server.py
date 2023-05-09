@@ -57,16 +57,19 @@ def process_tag_detection(msg):
     global LAST_POSE_TIME
     global set_mode
 
+
     if len(msg.detections) > 0:
         LAST_POSE_TIME = time.time()
         detection_pose = msg.detections[-1].pose
 
         # If we're still looking for the tag... we've found it! Begin Centering!
-        if state == RobotState.SEEKING and abs(detection_pose.pose.pose.position.x) < 3.0 and abs(detection_pose.pose.pose.position.y) < 3.0 :
+        if state == RobotState.SEEKING and abs(detection_pose.pose.pose.position.x) < 5.0 and abs(detection_pose.pose.pose.position.y) < 5.0 :
             state = RobotState.CENTERING
             set_mode(0, "QLOITER")
             print('Enter Centering Mode')
             CENTERING_START = time.time()
+
+            
 
 
 
@@ -82,9 +85,12 @@ MAX_DIRECTION = 250
 
 x_setpoint = 0.0
 y_setpoint = 0.0
-z_setpoint = 3.0
+z_setpoint = 12.0
 diff = 1.0
-settle_time = 10.0
+settle_time = 6.0
+
+
+
 
 state = RobotState.SEEKING
 print('Enter Seeking Mode:')
@@ -103,24 +109,28 @@ def main():
     global diff
     global set_mode
     global settle_time
+    global CENTERING_START
 
     # init pids
     xcoord_PID = PID(25.0, 2.5, 2.0, setpoint=x_setpoint)
-    ycoord_PID = PID(25.0, 3.0, 2.0, setpoint=y_setpoint)
-    zcoord_PID = PID(10.0, 2.0, 0.0, setpoint=z_setpoint)
-
-    last_update_time = time.time()
-    last_diffpoint = None
+    ycoord_PID = PID(21.5, 1.0, 0.5, setpoint=y_setpoint)
+    zcoord_PID = PID(10.0, 1.0, 0.0, setpoint=z_setpoint)
 
     # Begin launching.
     set_mode(0, "AUTO")
     arm(True)
 
+    last_diffpoint = None
+    last_update_time = None
+
     while not rospy.is_shutdown():
         if state.is_centering() or state.is_descending():
+
             # Actively center on the target.
             posn = detection_pose.pose.pose.position
             current_time = time.time()
+            if last_update_time == None:
+                last_update_time = CENTERING_START
             dt = current_time - last_update_time
             last_update_time = current_time
 
@@ -135,7 +145,7 @@ def main():
             else:
                 desiredMove = applyDirection(-roll_factor, pitch_factor, 0, 0)
 
-            print("X Error: {:4.4f}, Y Error: {:4.4f}, Z Error: {:4.4f}".format(posn.x, posn.y, posn.z))
+            print("X Error: {:4.4f}, Y Error: {:4.4f}, Z Error: {:4.4f}".format(posn.x, posn.y, posn.z - z_setpoint))
 
             # If our difference is marginal, progress to the next stage of the landing cycle.
             if state.is_centering():
@@ -145,7 +155,7 @@ def main():
                     elif current_time - last_diffpoint > settle_time:
                         state = RobotState.DESCENDING
                         last_diffpoint = None
-                        print("Beginning descent...\n\n\n\n\n")
+                        print("\n\n\n...Beginning descent...\n\n\n")
                 else:
                     last_diffpoint = current_time
 
@@ -155,10 +165,19 @@ def main():
                         last_diffpoint = current_time
                     elif current_time - last_diffpoint > settle_time:
                         state = RobotState.LANDING
-                        # set_mode(0, "QLAND")
-                        print("Releasing control from PID controllers...\n\n\n\n\n")
+                        set_mode(0, "QLAND")
+                        print("\n\n\n...Releasing control from PID controllers...\n\n\n")
                 else:
                     last_diffpoint = current_time
+
+                # if not_detected:
+                #     if last_detect_point is None:
+                #         last_detect_point = current_time
+                #     elif current_time - last_detect_point > 3.0:
+                #         state = RobotState.LANDING
+                #         set_mode(0, "QLAND")
+                # else:
+                #     last_detect_point = None
 
     
             print("Roll: {:4.4f} Pitch: {:4.4f} Throttle: {:4.4f} Yaw: {:4.4f}"
