@@ -68,6 +68,10 @@ def process_tag_detection(msg):
             set_mode(0, "QLOITER")
             print('Enter Centering Mode')
             CENTERING_START = time.time()
+        
+        if state == RobotState.DESCENDING and (abs(detection_pose.pose.pose.position.x) > 1.5 or abs(detection_pose.pose.pose.position.y) > 1.5):
+            state = RobotState.CENTERING
+            print('Recentering')
 
             
 
@@ -114,7 +118,7 @@ def main():
     # init pids
     xcoord_PID = PID(25.0, 2.5, 2.0, setpoint=x_setpoint)
     ycoord_PID = PID(21.5, 1.0, 0.5, setpoint=y_setpoint)
-    zcoord_PID = PID(10.0, 1.0, 0.0, setpoint=z_setpoint)
+    zcoord_PID = PID(10.0, 5.0, 0.0, setpoint=z_setpoint)
 
     # Begin launching.
     set_mode(0, "AUTO")
@@ -155,7 +159,7 @@ def main():
                     elif current_time - last_diffpoint > settle_time:
                         state = RobotState.DESCENDING
                         last_diffpoint = None
-                        print("\n\n\n...Beginning descent...\n\n\n")
+                        print("\n\n\n...Descending...\n\n\n")
                 else:
                     last_diffpoint = current_time
 
